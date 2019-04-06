@@ -1,0 +1,12 @@
+target/
+.idea/
+logs/
+*.iml
+*.log
+*.orig
+deploy.sh
+pom.xml.releaseBackup
+.project
+.settings
+.classpath
+.log
