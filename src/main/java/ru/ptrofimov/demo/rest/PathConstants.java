@@ -6,4 +6,5 @@ public final class PathConstants {
     public static final String API = "api";
     static final String MONEY_TRANSFER_ENTRY_POINT = "moneyTransfer";
     static final String GREETING_PATH = "greeting";
+    static final String ACCOUNTS = "accounts";
 }

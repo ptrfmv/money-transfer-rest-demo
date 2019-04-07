@@ -20,7 +20,7 @@ public class App {
         try {
             jettyServer.start();
             jettyServer.join();
-        }catch (Exception e) {
+        } catch (Exception e) {
             logger.error(e.getMessage(), e);
             throw e;
         } finally {
