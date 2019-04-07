@@ -4,6 +4,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import ru.ptrofimov.demo.model.AccountDetails;
 import ru.ptrofimov.demo.model.Currency;
+import ru.ptrofimov.demo.model.MoneyTransferResponse;
+import ru.ptrofimov.demo.model.MoneyTransferStatus;
 import ru.ptrofimov.demo.utils.DBUtils;
 
 import javax.ws.rs.*;
@@ -11,7 +13,7 @@ import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.math.BigDecimal;
 import java.sql.*;
-import java.util.Objects;
+import java.util.*;
 
 import static ru.ptrofimov.demo.rest.PathConstants.*;
 
@@ -71,27 +73,110 @@ public class MoneyTransferEntryPoint {
         try {
             AccountDetails result = null;
             try (Connection connection = DBUtils.getConnection()) {
-                try (PreparedStatement statement = connection.prepareStatement(
-                        "SELECT CURRENCY, BALANCE, OWNER FROM ACCOUNTS WHERE ID = ?")) {
-                    statement.setLong(1, accountId);
-                    statement.execute();
-                    try (ResultSet resultSet = statement.getResultSet()) {
-                        if (resultSet.next()) {
-                            result = new AccountDetails();
-                            result.setCurrency(Currency.fromString(resultSet.getString(1)));
-                            result.setBalance(resultSet.getBigDecimal(2));
-                            result.setOwner(resultSet.getString(3));
-                        }
-                    }
-                }
+                result = getAccountDetails(connection, accountId);
             }
             if (result == null)
                 return Response.status(Response.Status.NOT_FOUND).build();
             else
-                return Response.ok().entity(result).build();
+                return Response.ok(result).build();
         } catch (Exception e) {
             logger.error(e.getMessage(), e);
             throw e;
+        }
+    }
+
+    private static AccountDetails getAccountDetails(Connection connection, long accountId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT CURRENCY, BALANCE, OWNER FROM ACCOUNTS WHERE ID = ?")) {
+            statement.setLong(1, accountId);
+            statement.execute();
+            try (ResultSet resultSet = statement.getResultSet()) {
+                if (resultSet.next()) {
+                    AccountDetails result = new AccountDetails();
+                    result.setCurrency(Currency.fromString(resultSet.getString(1)));
+                    result.setBalance(resultSet.getBigDecimal(2));
+                    result.setOwner(resultSet.getString(3));
+                    return result;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static final Map<AccountLockKey, Object> LOCK_POOL = Collections.synchronizedMap(new WeakHashMap<>());
+
+    @POST
+    @Path(ACCOUNTS + "/{accountId}")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response transferMoney(@PathParam("accountId") long recipientId,
+                                  @FormParam("from") long senderId,
+                                  @FormParam("amount") BigDecimal amount) throws SQLException {
+        try {
+            try (Connection connection = DBUtils.getConnection()) {
+                connection.setAutoCommit(false);
+                long firstAccId = Math.min(senderId, recipientId);
+                long secondAccId = Math.max(senderId, recipientId);
+                AccountLockKey lockKey = new AccountLockKey(firstAccId, secondAccId);
+                synchronized (LOCK_POOL.computeIfAbsent(lockKey, key -> new Object())) {
+                    AccountDetails recipientAccountDetails = getAccountDetails(connection, recipientId);
+                    if (recipientAccountDetails == null) {
+                        return Response.status(Response.Status.NOT_FOUND).build();
+                    }
+
+                    AccountDetails senderAccountDetails = getAccountDetails(connection, senderId);
+                    if (senderAccountDetails == null) {
+                        return Response.ok(new MoneyTransferResponse(MoneyTransferStatus.ACCOUNT_NOT_FOUND)).build();
+                    }
+
+                    if (recipientAccountDetails.getCurrency() != senderAccountDetails.getCurrency()) {
+                        return Response.ok(new MoneyTransferResponse(MoneyTransferStatus.CURRENCY_MISMATCH)).build();
+                    }
+
+                    BigDecimal subtract = senderAccountDetails.getBalance().subtract(amount);
+                    if (subtract.compareTo(BigDecimal.ZERO) < 0) {
+                        return Response.ok(new MoneyTransferResponse(MoneyTransferStatus.INSUFFICIENT_FUNDS)).build();
+                    }
+
+                    updateBalance(connection, senderId, subtract);
+                    updateBalance(connection, recipientId, recipientAccountDetails.getBalance().add(amount));
+
+                    connection.commit();
+
+                    return Response.ok(new MoneyTransferResponse(MoneyTransferStatus.SUCCESS)).build();
+                }
+            }
+        } catch (Exception e) {
+            logger.error(e.getMessage(), e);
+            throw e;
+        }
+    }
+
+    private static void updateBalance(Connection connection, long accountId, BigDecimal balance) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("UPDATE ACCOUNTS SET BALANCE = ? WHERE ID = ?")) {
+            statement.setBigDecimal(1, balance);
+            statement.setLong(2, accountId);
+            statement.executeUpdate();
+        }
+    }
+
+    private static final class AccountLockKey {
+        private long[] accountIds;
+
+        AccountLockKey(long... accountIds) {
+            this.accountIds = accountIds;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            AccountLockKey that = (AccountLockKey) o;
+            return Arrays.equals(accountIds, that.accountIds);
+        }
+
+        @Override
+        public int hashCode() {
+            return Arrays.hashCode(accountIds);
         }
     }
 }

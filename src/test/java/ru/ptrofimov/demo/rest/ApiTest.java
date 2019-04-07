@@ -7,6 +7,8 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 import ru.ptrofimov.demo.model.AccountDetails;
 import ru.ptrofimov.demo.model.Currency;
+import ru.ptrofimov.demo.model.MoneyTransferResponse;
+import ru.ptrofimov.demo.model.MoneyTransferStatus;
 import ru.ptrofimov.demo.utils.JettyUtils;
 
 import javax.ws.rs.client.Client;
@@ -74,5 +76,68 @@ public class ApiTest extends Assert {
         //noinspection SimplifiableJUnitAssertion
         assertTrue(balance.compareTo(accountDetails.getBalance()) == 0); // equals won't work because of trailing zeros
         assertEquals(owner, accountDetails.getOwner());
+    }
+
+    @Test
+    public void testTransferDifferentCurrencies() {
+        Client client = ClientBuilder.newClient();
+
+        Form form = new Form();
+        form.param("from", Long.toString(2));
+        form.param("amount", String.valueOf(0));
+
+        MoneyTransferResponse response = client.target("http://localhost:8080/" + API)
+                .path(MONEY_TRANSFER_ENTRY_POINT + "/" + ACCOUNTS + "/" + 3)
+                .request(MediaType.APPLICATION_JSON_TYPE)
+                .post(Entity.entity(form, MediaType.APPLICATION_FORM_URLENCODED_TYPE), MoneyTransferResponse.class);
+        assertEquals(MoneyTransferStatus.CURRENCY_MISMATCH, response.getStatus());
+    }
+
+    @Test
+    public void testTransferWithInsufficientFunds() {
+        Client client = ClientBuilder.newClient();
+
+        Form form = new Form();
+        form.param("from", Long.toString(4));
+        form.param("amount", String.valueOf(700));
+
+        MoneyTransferResponse response = client.target("http://localhost:8080/" + API)
+                .path(MONEY_TRANSFER_ENTRY_POINT + "/" + ACCOUNTS + "/" + 1)
+                .request(MediaType.APPLICATION_JSON_TYPE)
+                .post(Entity.entity(form, MediaType.APPLICATION_FORM_URLENCODED_TYPE), MoneyTransferResponse.class);
+        assertEquals(MoneyTransferStatus.INSUFFICIENT_FUNDS, response.getStatus());
+    }
+
+    @Test
+    public void testTransferMoney() {
+        final long sender = 1; // 1000 RUR
+        final long recipient = 4; // 500 RUR
+
+        Client client = ClientBuilder.newClient();
+
+        BigDecimal amount = BigDecimal.valueOf(500);
+        Form form = new Form();
+        form.param("from", Long.toString(sender));
+        form.param("amount", amount.toString());
+
+        MoneyTransferResponse response = client.target("http://localhost:8080/" + API)
+                .path(MONEY_TRANSFER_ENTRY_POINT + "/" + ACCOUNTS + "/" + recipient)
+                .request(MediaType.APPLICATION_JSON_TYPE)
+                .post(Entity.entity(form, MediaType.APPLICATION_FORM_URLENCODED_TYPE), MoneyTransferResponse.class);
+        assertEquals(MoneyTransferStatus.SUCCESS, response.getStatus());
+
+        AccountDetails senderDetails = client.target("http://localhost:8080/" + API)
+                .path(MONEY_TRANSFER_ENTRY_POINT + "/" + ACCOUNTS + "/" + sender)
+                .request(MediaType.APPLICATION_JSON_TYPE)
+                .get(AccountDetails.class);
+        //noinspection SimplifiableJUnitAssertion
+        assertTrue(BigDecimal.valueOf(500).compareTo(senderDetails.getBalance()) == 0);
+
+        AccountDetails recipientDetails = client.target("http://localhost:8080/" + API)
+                .path(MONEY_TRANSFER_ENTRY_POINT + "/" + ACCOUNTS + "/" + recipient)
+                .request(MediaType.APPLICATION_JSON_TYPE)
+                .get(AccountDetails.class);
+        //noinspection SimplifiableJUnitAssertion
+        assertTrue(BigDecimal.valueOf(1000).compareTo(recipientDetails.getBalance()) == 0);
     }
 }
