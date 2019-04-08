@@ -13,7 +13,7 @@ import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.math.BigDecimal;
 import java.sql.*;
-import java.util.*;
+import java.util.Objects;
 
 import static ru.ptrofimov.demo.rest.PathConstants.*;
 
@@ -61,7 +61,7 @@ public class MoneyTransferEntryPoint {
             result.setId(insertedId);
             return result;
         } catch (Exception e) {
-            logger.error(e.getMessage() ,e);
+            logger.error(e.getMessage(), e);
             throw e;
         }
     }
@@ -103,8 +103,6 @@ public class MoneyTransferEntryPoint {
         return null;
     }
 
-    private static final Map<AccountLockKey, Object> LOCK_POOL = Collections.synchronizedMap(new WeakHashMap<>());
-
     @POST
     @Path(ACCOUNTS + "/{accountId}")
     @Produces(MediaType.APPLICATION_JSON)
@@ -114,35 +112,45 @@ public class MoneyTransferEntryPoint {
         try {
             try (Connection connection = DBUtils.getConnection()) {
                 connection.setAutoCommit(false);
-                long firstAccId = Math.min(senderId, recipientId);
-                long secondAccId = Math.max(senderId, recipientId);
-                AccountLockKey lockKey = new AccountLockKey(firstAccId, secondAccId);
-                synchronized (LOCK_POOL.computeIfAbsent(lockKey, key -> new Object())) {
-                    AccountDetails recipientAccountDetails = getAccountDetails(connection, recipientId);
-                    if (recipientAccountDetails == null) {
-                        return Response.status(Response.Status.NOT_FOUND).build();
-                    }
+                AccountDetailsWithVersion recipientAccountDetails = getAccountDetailsWithVersion(connection, recipientId);
+                if (recipientAccountDetails == null) {
+                    return Response.status(Response.Status.NOT_FOUND).build();
+                }
+                recipientAccountDetails.setId(recipientId);
 
-                    AccountDetails senderAccountDetails = getAccountDetails(connection, senderId);
-                    if (senderAccountDetails == null) {
-                        return Response.ok(new MoneyTransferResponse(MoneyTransferStatus.ACCOUNT_NOT_FOUND)).build();
-                    }
+                AccountDetailsWithVersion senderAccountDetails = getAccountDetailsWithVersion(connection, senderId);
+                if (senderAccountDetails == null) {
+                    return Response.ok(new MoneyTransferResponse(MoneyTransferStatus.ACCOUNT_NOT_FOUND)).build();
+                }
+                senderAccountDetails.setId(senderId);
 
-                    if (recipientAccountDetails.getCurrency() != senderAccountDetails.getCurrency()) {
-                        return Response.ok(new MoneyTransferResponse(MoneyTransferStatus.CURRENCY_MISMATCH)).build();
-                    }
+                if (recipientAccountDetails.getCurrency() != senderAccountDetails.getCurrency()) {
+                    return Response.ok(new MoneyTransferResponse(MoneyTransferStatus.CURRENCY_MISMATCH)).build();
+                }
 
-                    BigDecimal subtract = senderAccountDetails.getBalance().subtract(amount);
-                    if (subtract.compareTo(BigDecimal.ZERO) < 0) {
-                        return Response.ok(new MoneyTransferResponse(MoneyTransferStatus.INSUFFICIENT_FUNDS)).build();
-                    }
+                BigDecimal subtract = senderAccountDetails.getBalance().subtract(amount);
+                if (subtract.compareTo(BigDecimal.ZERO) < 0) {
+                    return Response.ok(new MoneyTransferResponse(MoneyTransferStatus.INSUFFICIENT_FUNDS)).build();
+                }
 
-                    updateBalance(connection, senderId, subtract);
-                    updateBalance(connection, recipientId, recipientAccountDetails.getBalance().add(amount));
+                senderAccountDetails.setBalance(subtract);
+                recipientAccountDetails.setBalance(recipientAccountDetails.getBalance().add(amount));
 
+                AccountDetailsWithVersion first, second;
+                if (senderId <= recipientId) {
+                    first = senderAccountDetails;
+                    second = recipientAccountDetails;
+                } else {
+                    first = recipientAccountDetails;
+                    second = senderAccountDetails;
+                }
+                connection.setTransactionIsolation(Connection.TRANSACTION_READ_UNCOMMITTED);
+                if (updateBalance(connection, first) && updateBalance(connection, second)) {
                     connection.commit();
-
                     return Response.ok(new MoneyTransferResponse(MoneyTransferStatus.SUCCESS)).build();
+                } else {
+                    connection.rollback();
+                    return Response.status(Response.Status.CONFLICT).build();
                 }
             }
         } catch (Exception e) {
@@ -151,32 +159,44 @@ public class MoneyTransferEntryPoint {
         }
     }
 
-    private static void updateBalance(Connection connection, long accountId, BigDecimal balance) throws SQLException {
-        try (PreparedStatement statement = connection.prepareStatement("UPDATE ACCOUNTS SET BALANCE = ? WHERE ID = ?")) {
-            statement.setBigDecimal(1, balance);
-            statement.setLong(2, accountId);
-            statement.executeUpdate();
+    private static AccountDetailsWithVersion getAccountDetailsWithVersion(Connection connection, long accountId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT CURRENCY, BALANCE, OWNER, VERSION FROM ACCOUNTS WHERE ID = ?")) {
+            statement.setLong(1, accountId);
+            statement.execute();
+            try (ResultSet resultSet = statement.getResultSet()) {
+                if (resultSet.next()) {
+                    AccountDetailsWithVersion result = new AccountDetailsWithVersion();
+                    result.setCurrency(Currency.fromString(resultSet.getString(1)));
+                    result.setBalance(resultSet.getBigDecimal(2));
+                    result.setOwner(resultSet.getString(3));
+                    result.setVersion(resultSet.getInt(4));
+                    return result;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static boolean updateBalance(Connection connection, AccountDetailsWithVersion accountDetails) throws SQLException {
+        try (PreparedStatement statement = connection
+                .prepareStatement("UPDATE ACCOUNTS SET BALANCE = ?, VERSION = VERSION + 1 WHERE ID = ? AND VERSION = ?")) {
+            statement.setBigDecimal(1, accountDetails.getBalance());
+            statement.setLong(2, accountDetails.getId());
+            statement.setInt(3, accountDetails.getVersion());
+            return statement.executeUpdate() == 1;
         }
     }
 
-    private static final class AccountLockKey {
-        private long[] accountIds;
+    private static class AccountDetailsWithVersion extends AccountDetails {
+        private int version;
 
-        AccountLockKey(long... accountIds) {
-            this.accountIds = accountIds;
+        int getVersion() {
+            return version;
         }
 
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
-            AccountLockKey that = (AccountLockKey) o;
-            return Arrays.equals(accountIds, that.accountIds);
-        }
-
-        @Override
-        public int hashCode() {
-            return Arrays.hashCode(accountIds);
+        void setVersion(int version) {
+            this.version = version;
         }
     }
 }
