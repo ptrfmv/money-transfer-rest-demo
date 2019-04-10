@@ -71,7 +71,7 @@ public class MoneyTransferEntryPoint {
     @Produces(MediaType.APPLICATION_JSON)
     public Response getAccountDetails(@PathParam("accountId") long accountId) throws SQLException {
         try {
-            AccountDetails result = null;
+            AccountDetails result;
             try (Connection connection = DBUtils.getConnection()) {
                 result = getAccountDetails(connection, accountId);
             }
@@ -109,6 +109,10 @@ public class MoneyTransferEntryPoint {
     public Response transferMoney(@PathParam("accountId") long recipientId,
                                   @FormParam("from") long senderId,
                                   @FormParam("amount") BigDecimal amount) throws SQLException {
+        if (recipientId == 0 || senderId == 0 || recipientId == senderId ||
+                amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) {
+            return Response.status(Response.Status.BAD_REQUEST).build();
+        }
         try {
             try (Connection connection = DBUtils.getConnection()) {
                 connection.setAutoCommit(false);

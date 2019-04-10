@@ -16,6 +16,7 @@ import javax.ws.rs.client.ClientBuilder;
 import javax.ws.rs.client.Entity;
 import javax.ws.rs.core.Form;
 import javax.ws.rs.core.MediaType;
+import javax.ws.rs.core.Response;
 
 import java.math.BigDecimal;
 import java.util.UUID;
@@ -84,7 +85,7 @@ public class ApiTest extends Assert {
 
         Form form = new Form();
         form.param("from", Long.toString(2));
-        form.param("amount", String.valueOf(0));
+        form.param("amount", BigDecimal.ONE.toString());
 
         MoneyTransferResponse response = client.target("http://localhost:8080/" + API)
                 .path(MONEY_TRANSFER_ENTRY_POINT + "/" + ACCOUNTS + "/" + 3)
@@ -106,6 +107,21 @@ public class ApiTest extends Assert {
                 .request(MediaType.APPLICATION_JSON_TYPE)
                 .post(Entity.entity(form, MediaType.APPLICATION_FORM_URLENCODED_TYPE), MoneyTransferResponse.class);
         assertEquals(MoneyTransferStatus.INSUFFICIENT_FUNDS, response.getStatus());
+    }
+
+    @Test
+    public void testTransferNegativeFunds() {
+        Client client = ClientBuilder.newClient();
+
+        Form form = new Form();
+        form.param("from", Long.toString(4));
+        form.param("amount", String.valueOf(-700));
+
+        Response response = client.target("http://localhost:8080/" + API)
+                .path(MONEY_TRANSFER_ENTRY_POINT + "/" + ACCOUNTS + "/" + 1)
+                .request(MediaType.APPLICATION_JSON_TYPE)
+                .post(Entity.entity(form, MediaType.APPLICATION_FORM_URLENCODED_TYPE), Response.class);
+        assertEquals(Response.Status.BAD_REQUEST.getStatusCode(), response.getStatus());
     }
 
     @Test
