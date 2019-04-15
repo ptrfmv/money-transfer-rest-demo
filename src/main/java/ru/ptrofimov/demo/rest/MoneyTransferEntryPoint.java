@@ -31,14 +31,13 @@ public class MoneyTransferEntryPoint {
 
     @POST
     @Path(ACCOUNTS)
+    @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
-    public AccountDetails createAccount(@FormParam("currency") Currency currency,
-                                        @FormParam("balance") BigDecimal balance,
-                                        @FormParam("owner") String owner) throws SQLException {
+    public AccountDetails createAccount(AccountDetails accountDetails) throws SQLException {
         try {
-            Objects.requireNonNull(currency);
-            Objects.requireNonNull(balance);
-            Objects.requireNonNull(owner);
+            Currency currency = Objects.requireNonNull(accountDetails.getCurrency());
+            BigDecimal balance = Objects.requireNonNull(accountDetails.getBalance());
+            String owner = Objects.requireNonNull(accountDetails.getOwner());
             long insertedId;
             try (Connection connection = DBUtils.getConnection()) {
                 logger.trace("inserting currency = {} balance = {} owner = {}", currency, balance, owner);

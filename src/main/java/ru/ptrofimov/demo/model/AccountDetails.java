@@ -8,6 +8,15 @@ public class AccountDetails {
     private BigDecimal balance;
     private String owner;
 
+    public AccountDetails() {
+    }
+
+    public AccountDetails(Currency currency, BigDecimal balance, String owner) {
+        this.currency = currency;
+        this.balance = balance;
+        this.owner = owner;
+    }
+
     public long getId() {
         return id;
     }

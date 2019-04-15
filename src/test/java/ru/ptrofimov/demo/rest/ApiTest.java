@@ -59,14 +59,12 @@ public class ApiTest extends Assert {
         BigDecimal balance = BigDecimal.valueOf(1200);
         String owner = UUID.randomUUID().toString();
 
-        Form form = new Form();
-        form.param("currency", currency.getShortName());
-        form.param("balance", balance.toString());
-        form.param("owner", owner);
-        AccountDetails accountDetails = client.target("http://localhost:8080/" + API)
+        AccountDetails accountDetails = new AccountDetails(currency, balance, owner);
+
+        accountDetails = client.target("http://localhost:8080/" + API)
                 .path(MONEY_TRANSFER_ENTRY_POINT + "/" + ACCOUNTS)
                 .request(MediaType.APPLICATION_JSON_TYPE)
-                .post(Entity.entity(form, MediaType.APPLICATION_FORM_URLENCODED_TYPE), AccountDetails.class);
+                .post(Entity.entity(accountDetails, MediaType.APPLICATION_JSON_TYPE), AccountDetails.class);
         long accountId = accountDetails.getId();
 
         accountDetails = client.target("http://localhost:8080/" + API)
