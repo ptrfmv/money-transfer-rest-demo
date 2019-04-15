@@ -2,10 +2,8 @@ package ru.ptrofimov.demo.rest;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import ru.ptrofimov.demo.model.AccountDetails;
-import ru.ptrofimov.demo.model.Currency;
-import ru.ptrofimov.demo.model.MoneyTransferResponse;
-import ru.ptrofimov.demo.model.MoneyTransferStatus;
+import ru.ptrofimov.demo.exceptions.AccountNotFoundException;
+import ru.ptrofimov.demo.model.*;
 import ru.ptrofimov.demo.utils.DBUtils;
 
 import javax.ws.rs.*;
@@ -70,22 +68,18 @@ public class MoneyTransferEntryPoint {
     @Path(ACCOUNTS + "/{accountId}")
     @Produces(MediaType.APPLICATION_JSON)
     public Response getAccountDetails(@PathParam("accountId") long accountId) throws SQLException {
-        try {
-            AccountDetails result;
-            try (Connection connection = DBUtils.getConnection()) {
-                result = getAccountDetails(connection, accountId);
-            }
-            if (result == null)
-                return Response.status(Response.Status.NOT_FOUND).build();
-            else
-                return Response.ok(result).build();
+        try (Connection connection = DBUtils.getConnection()) {
+            AccountDetails result = getAccountDetails(connection, accountId);
+            return Response.ok(result).build();
+        } catch (AccountNotFoundException accEx) {
+            return Response.status(Response.Status.NOT_FOUND).build();
         } catch (Exception e) {
             logger.error(e.getMessage(), e);
             throw e;
         }
     }
 
-    private static AccountDetails getAccountDetails(Connection connection, long accountId) throws SQLException {
+    private static AccountDetails getAccountDetails(Connection connection, long accountId) throws SQLException, AccountNotFoundException {
         try (PreparedStatement statement = connection.prepareStatement(
                 "SELECT CURRENCY, BALANCE, OWNER FROM ACCOUNTS WHERE ID = ?")) {
             statement.setLong(1, accountId);
@@ -100,7 +94,7 @@ public class MoneyTransferEntryPoint {
                 }
             }
         }
-        return null;
+        throw new AccountNotFoundException();
     }
 
     @POST
@@ -116,17 +110,22 @@ public class MoneyTransferEntryPoint {
         try {
             try (Connection connection = DBUtils.getConnection()) {
                 connection.setAutoCommit(false);
-                AccountDetailsWithVersion recipientAccountDetails = getAccountDetailsWithVersion(connection, recipientId);
-                if (recipientAccountDetails == null) {
+
+                AccountDetailsWithVersion recipientAccountDetails;
+                try {
+                    recipientAccountDetails = getAccountDetailsWithVersion(connection, recipientId);
+                    recipientAccountDetails.setId(recipientId);
+                } catch (AccountNotFoundException accEx) {
                     return Response.status(Response.Status.NOT_FOUND).build();
                 }
-                recipientAccountDetails.setId(recipientId);
 
-                AccountDetailsWithVersion senderAccountDetails = getAccountDetailsWithVersion(connection, senderId);
-                if (senderAccountDetails == null) {
+                AccountDetailsWithVersion senderAccountDetails;
+                try {
+                    senderAccountDetails = getAccountDetailsWithVersion(connection, senderId);
+                    senderAccountDetails.setId(senderId);
+                } catch (AccountNotFoundException accEx) {
                     return Response.ok(new MoneyTransferResponse(MoneyTransferStatus.ACCOUNT_NOT_FOUND)).build();
                 }
-                senderAccountDetails.setId(senderId);
 
                 if (recipientAccountDetails.getCurrency() != senderAccountDetails.getCurrency()) {
                     return Response.ok(new MoneyTransferResponse(MoneyTransferStatus.CURRENCY_MISMATCH)).build();
@@ -163,7 +162,8 @@ public class MoneyTransferEntryPoint {
         }
     }
 
-    private static AccountDetailsWithVersion getAccountDetailsWithVersion(Connection connection, long accountId) throws SQLException {
+    private static AccountDetailsWithVersion getAccountDetailsWithVersion(Connection connection, long accountId)
+            throws SQLException, AccountNotFoundException {
         try (PreparedStatement statement = connection.prepareStatement(
                 "SELECT CURRENCY, BALANCE, OWNER, VERSION FROM ACCOUNTS WHERE ID = ?")) {
             statement.setLong(1, accountId);
@@ -179,7 +179,7 @@ public class MoneyTransferEntryPoint {
                 }
             }
         }
-        return null;
+        throw new AccountNotFoundException();
     }
 
     private static boolean updateBalance(Connection connection, AccountDetailsWithVersion accountDetails) throws SQLException {
@@ -189,18 +189,6 @@ public class MoneyTransferEntryPoint {
             statement.setLong(2, accountDetails.getId());
             statement.setInt(3, accountDetails.getVersion());
             return statement.executeUpdate() == 1;
-        }
-    }
-
-    private static class AccountDetailsWithVersion extends AccountDetails {
-        private int version;
-
-        int getVersion() {
-            return version;
-        }
-
-        void setVersion(int version) {
-            this.version = version;
         }
     }
 }
