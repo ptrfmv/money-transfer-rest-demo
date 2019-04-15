@@ -104,7 +104,7 @@ public class MoneyTransferEntryPoint {
     }
 
     @POST
-    @Path(ACCOUNTS + "/{accountId}")
+    @Path(ACCOUNTS + "/{accountId}/balance")
     @Produces(MediaType.APPLICATION_JSON)
     public Response transferMoney(@PathParam("accountId") long recipientId,
                                   @FormParam("from") long senderId,

@@ -88,7 +88,7 @@ public class ApiTest extends Assert {
         form.param("amount", BigDecimal.ONE.toString());
 
         MoneyTransferResponse response = client.target("http://localhost:8080/" + API)
-                .path(MONEY_TRANSFER_ENTRY_POINT + "/" + ACCOUNTS + "/" + 3)
+                .path(MONEY_TRANSFER_ENTRY_POINT + "/" + ACCOUNTS + "/" + 3 + "/balance")
                 .request(MediaType.APPLICATION_JSON_TYPE)
                 .post(Entity.entity(form, MediaType.APPLICATION_FORM_URLENCODED_TYPE), MoneyTransferResponse.class);
         assertEquals(MoneyTransferStatus.CURRENCY_MISMATCH, response.getStatus());
@@ -103,7 +103,7 @@ public class ApiTest extends Assert {
         form.param("amount", String.valueOf(700));
 
         MoneyTransferResponse response = client.target("http://localhost:8080/" + API)
-                .path(MONEY_TRANSFER_ENTRY_POINT + "/" + ACCOUNTS + "/" + 1)
+                .path(MONEY_TRANSFER_ENTRY_POINT + "/" + ACCOUNTS + "/" + 1 + "/balance")
                 .request(MediaType.APPLICATION_JSON_TYPE)
                 .post(Entity.entity(form, MediaType.APPLICATION_FORM_URLENCODED_TYPE), MoneyTransferResponse.class);
         assertEquals(MoneyTransferStatus.INSUFFICIENT_FUNDS, response.getStatus());
@@ -118,7 +118,7 @@ public class ApiTest extends Assert {
         form.param("amount", String.valueOf(-700));
 
         Response response = client.target("http://localhost:8080/" + API)
-                .path(MONEY_TRANSFER_ENTRY_POINT + "/" + ACCOUNTS + "/" + 1)
+                .path(MONEY_TRANSFER_ENTRY_POINT + "/" + ACCOUNTS + "/" + 1 + "/balance")
                 .request(MediaType.APPLICATION_JSON_TYPE)
                 .post(Entity.entity(form, MediaType.APPLICATION_FORM_URLENCODED_TYPE), Response.class);
         assertEquals(Response.Status.BAD_REQUEST.getStatusCode(), response.getStatus());
@@ -137,7 +137,7 @@ public class ApiTest extends Assert {
         form.param("amount", amount.toString());
 
         MoneyTransferResponse response = client.target("http://localhost:8080/" + API)
-                .path(MONEY_TRANSFER_ENTRY_POINT + "/" + ACCOUNTS + "/" + recipient)
+                .path(MONEY_TRANSFER_ENTRY_POINT + "/" + ACCOUNTS + "/" + recipient + "/balance")
                 .request(MediaType.APPLICATION_JSON_TYPE)
                 .post(Entity.entity(form, MediaType.APPLICATION_FORM_URLENCODED_TYPE), MoneyTransferResponse.class);
         assertEquals(MoneyTransferStatus.SUCCESS, response.getStatus());
