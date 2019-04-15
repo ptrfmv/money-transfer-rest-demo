@@ -113,7 +113,6 @@ public class MoneyTransferEntryPoint {
                 AccountDetailsWithVersion recipientAccountDetails;
                 try {
                     recipientAccountDetails = getAccountDetailsWithVersion(connection, recipientId);
-                    recipientAccountDetails.setId(recipientId);
                 } catch (AccountNotFoundException accEx) {
                     return Response.status(Response.Status.NOT_FOUND).build();
                 }
@@ -121,7 +120,6 @@ public class MoneyTransferEntryPoint {
                 AccountDetailsWithVersion senderAccountDetails;
                 try {
                     senderAccountDetails = getAccountDetailsWithVersion(connection, senderId);
-                    senderAccountDetails.setId(senderId);
                 } catch (AccountNotFoundException accEx) {
                     return Response.ok(new MoneyTransferResponse(MoneyTransferStatus.ACCOUNT_NOT_FOUND)).build();
                 }
@@ -174,6 +172,7 @@ public class MoneyTransferEntryPoint {
                     result.setBalance(resultSet.getBigDecimal(2));
                     result.setOwner(resultSet.getString(3));
                     result.setVersion(resultSet.getInt(4));
+                    result.setId(accountId);
                     return result;
                 }
             }
