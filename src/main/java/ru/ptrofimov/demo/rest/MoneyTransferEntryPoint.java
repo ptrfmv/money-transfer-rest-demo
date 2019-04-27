@@ -3,6 +3,7 @@ package ru.ptrofimov.demo.rest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import ru.ptrofimov.demo.exceptions.AccountNotFoundException;
+import ru.ptrofimov.demo.exceptions.InsufficientFundsException;
 import ru.ptrofimov.demo.model.*;
 import ru.ptrofimov.demo.utils.DBUtils;
 
@@ -89,6 +90,7 @@ public class MoneyTransferEntryPoint {
                     result.setCurrency(Currency.fromString(resultSet.getString(1)));
                     result.setBalance(resultSet.getBigDecimal(2));
                     result.setOwner(resultSet.getString(3));
+                    result.setId(accountId);
                     return result;
                 }
             }
@@ -106,52 +108,41 @@ public class MoneyTransferEntryPoint {
                 amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) {
             return Response.status(Response.Status.BAD_REQUEST).build();
         }
-        try {
-            try (Connection connection = DBUtils.getConnection()) {
-                connection.setAutoCommit(false);
+        try (Connection connection = DBUtils.getConnection()) {
+            connection.setAutoCommit(false);
 
-                AccountDetailsWithVersion recipientAccountDetails;
-                try {
-                    recipientAccountDetails = getAccountDetailsWithVersion(connection, recipientId);
-                } catch (AccountNotFoundException accEx) {
-                    return Response.status(Response.Status.NOT_FOUND).build();
-                }
+            AccountDetails recipientAccountDetails;
+            try {
+                recipientAccountDetails = getAccountDetails(connection, recipientId);
+            } catch (AccountNotFoundException accEx) {
+                return Response.status(Response.Status.NOT_FOUND).build();
+            }
 
-                AccountDetailsWithVersion senderAccountDetails;
-                try {
-                    senderAccountDetails = getAccountDetailsWithVersion(connection, senderId);
-                } catch (AccountNotFoundException accEx) {
-                    return Response.ok(new MoneyTransferResponse(MoneyTransferStatus.ACCOUNT_NOT_FOUND)).build();
-                }
+            AccountDetails senderAccountDetails;
+            try {
+                senderAccountDetails = getAccountDetails(connection, senderId);
+            } catch (AccountNotFoundException accEx) {
+                return Response.ok(new MoneyTransferResponse(MoneyTransferStatus.ACCOUNT_NOT_FOUND)).build();
+            }
 
-                if (recipientAccountDetails.getCurrency() != senderAccountDetails.getCurrency()) {
-                    return Response.ok(new MoneyTransferResponse(MoneyTransferStatus.CURRENCY_MISMATCH)).build();
-                }
+            if (recipientAccountDetails.getCurrency() != senderAccountDetails.getCurrency()) {
+                return Response.ok(new MoneyTransferResponse(MoneyTransferStatus.CURRENCY_MISMATCH)).build();
+            }
 
-                BigDecimal subtract = senderAccountDetails.getBalance().subtract(amount);
-                if (subtract.compareTo(BigDecimal.ZERO) < 0) {
+            try {
+                transferMoney(connection, senderId, recipientId, amount);
+                connection.commit();
+                return Response.ok(new MoneyTransferResponse(MoneyTransferStatus.SUCCESS)).build();
+            } catch (SQLNonTransientException sqlException) {
+                connection.rollback();
+                if (sqlException.getCause() instanceof InsufficientFundsException) {
                     return Response.ok(new MoneyTransferResponse(MoneyTransferStatus.INSUFFICIENT_FUNDS)).build();
-                }
-
-                senderAccountDetails.setBalance(subtract);
-                recipientAccountDetails.setBalance(recipientAccountDetails.getBalance().add(amount));
-
-                AccountDetailsWithVersion first, second;
-                if (senderId <= recipientId) {
-                    first = senderAccountDetails;
-                    second = recipientAccountDetails;
                 } else {
-                    first = recipientAccountDetails;
-                    second = senderAccountDetails;
+                    throw sqlException;
                 }
-                connection.setTransactionIsolation(Connection.TRANSACTION_READ_UNCOMMITTED);
-                if (updateBalance(connection, first) && updateBalance(connection, second)) {
-                    connection.commit();
-                    return Response.ok(new MoneyTransferResponse(MoneyTransferStatus.SUCCESS)).build();
-                } else {
-                    connection.rollback();
-                    return Response.status(Response.Status.CONFLICT).build();
-                }
+            } catch (Exception e) {
+                connection.rollback();
+                throw e;
             }
         } catch (Exception e) {
             logger.error(e.getMessage(), e);
@@ -159,34 +150,30 @@ public class MoneyTransferEntryPoint {
         }
     }
 
-    private static AccountDetailsWithVersion getAccountDetailsWithVersion(Connection connection, long accountId)
-            throws SQLException, AccountNotFoundException {
-        try (PreparedStatement statement = connection.prepareStatement(
-                "SELECT CURRENCY, BALANCE, OWNER, VERSION FROM ACCOUNTS WHERE ID = ?")) {
-            statement.setLong(1, accountId);
-            statement.execute();
-            try (ResultSet resultSet = statement.getResultSet()) {
-                if (resultSet.next()) {
-                    AccountDetailsWithVersion result = new AccountDetailsWithVersion();
-                    result.setCurrency(Currency.fromString(resultSet.getString(1)));
-                    result.setBalance(resultSet.getBigDecimal(2));
-                    result.setOwner(resultSet.getString(3));
-                    result.setVersion(resultSet.getInt(4));
-                    result.setId(accountId);
-                    return result;
-                }
-            }
+    private static void transferMoney(Connection connection, long senderId, long recipientId, BigDecimal amount) throws SQLException {
+        long first, second;
+        BigDecimal firstAmount, secondAmount;
+        if (senderId <= recipientId) {
+            first = senderId;
+            second = recipientId;
+            firstAmount = amount.negate();
+            secondAmount = amount;
+        } else {
+            first = recipientId;
+            second = senderId;
+            firstAmount = amount;
+            secondAmount = amount.negate();
         }
-        throw new AccountNotFoundException();
+        updateBalance(connection, first, firstAmount);
+        updateBalance(connection, second, secondAmount);
     }
 
-    private static boolean updateBalance(Connection connection, AccountDetailsWithVersion accountDetails) throws SQLException {
+    private static void updateBalance(Connection connection, long accountId, BigDecimal amount) throws SQLException {
         try (PreparedStatement statement = connection
-                .prepareStatement("UPDATE ACCOUNTS SET BALANCE = ?, VERSION = VERSION + 1 WHERE ID = ? AND VERSION = ?")) {
-            statement.setBigDecimal(1, accountDetails.getBalance());
-            statement.setLong(2, accountDetails.getId());
-            statement.setInt(3, accountDetails.getVersion());
-            return statement.executeUpdate() == 1;
+                .prepareStatement("UPDATE ACCOUNTS SET BALANCE = BALANCE + ? WHERE ID = ?")) {
+            statement.setBigDecimal(1, amount);
+            statement.setLong(2, accountId);
+            statement.executeUpdate();
         }
     }
 }
