@@ -27,8 +27,12 @@ public class UpdateBalanceTrigger implements Trigger {
 
     @Override
     public void fire(Connection conn, Object[] oldRow, Object[] newRow) throws SQLException {
-        BigDecimal oldBalance = (BigDecimal) oldRow[balanceColumn - 1];
-        BigDecimal newBalance = (BigDecimal) newRow[balanceColumn - 1];
+        validateBalance(oldRow[balanceColumn - 1], newRow[balanceColumn - 1]);
+    }
+
+    private void validateBalance(Object oldVal, Object newVal) {
+        BigDecimal oldBalance = (BigDecimal) oldVal;
+        BigDecimal newBalance = (BigDecimal) newVal;
         if (newBalance.compareTo(oldBalance) < 0 && newBalance.compareTo(BigDecimal.ZERO) < 0) {
             throw new InsufficientFundsException();
         }
